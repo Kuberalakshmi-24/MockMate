@@ -9,12 +9,8 @@ import {
   Code, Timer, Volume2, VolumeX, FileCheck, Award
 } from 'lucide-react';
 
-// 🌎 BACKEND URL (Orey idathula maathuna podhum)
+// 🌎 BACKEND URL
 const API_URL = "https://mockmate-backend-nxzo.onrender.com";
-
-// 🎤 VOICE INPUT SETUP
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-const recognition = SpeechRecognition ? new SpeechRecognition() : null;
 
 // --- SIDEBAR COMPONENT ---
 function Sidebar({ mobileOpen, setMobileOpen }) {
@@ -62,7 +58,6 @@ function Dashboard() {
   const [stats, setStats] = useState({ total: 0, avgScore: 0 });
 
   useEffect(() => {
-    // ✅ CORRECTED LINK: /dashboard
     axios.get(`${API_URL}/dashboard`)
       .then(res => {
         if (Array.isArray(res.data)) {
@@ -87,7 +82,7 @@ function Dashboard() {
   );
 }
 
-// --- INTERVIEW COMPONENT ---
+// --- INTERVIEW COMPONENT (Updated Mute Logic) ---
 function Interview() {
   const [chat, setChat] = useState([]);
   const [msg, setMsg] = useState("");
@@ -104,12 +99,14 @@ function Interview() {
 
   useEffect(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), [chat, loading]);
 
-  useEffect(() => {
-    if (timeLeft > 0 && chat.length > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
+  // 🔇 FIX: Stop Speaking IMMEDIATELY when Muted
+  const toggleVoice = () => {
+    const newState = !voiceEnabled;
+    setVoiceEnabled(newState);
+    if (!newState) {
+      window.speechSynthesis.cancel(); // Stop talking NOW!
     }
-  }, [timeLeft, chat]);
+  };
 
   const speak = (text) => {
     if (!voiceEnabled) return;
@@ -126,41 +123,40 @@ function Interview() {
     const formData = new FormData();
     formData.append("file", file);
     
-    // Show loading state
-    setChat([...chat, { role: "system", text: "⏳ Analyzing Resume... (This takes 30s on free server)" }]);
+    setChat([...chat, { role: "system", text: "⏳ Analyzing Resume... (I'm reading your skills)" }]);
 
     try {
-      // ✅ CORRECTED LINK: /upload
       const res = await axios.post(`${API_URL}/upload`, formData);
       setAtsData(res.data.ats_report); 
       setChat(prev => [...prev, { role: "system", text: "✅ Resume Parsed! Check your ATS Score above. Type 'start' to begin." }]);
     } catch (err) { 
         console.error(err);
-        setChat(prev => [...prev, { role: "system", text: "❌ Upload Failed. Server might be sleeping. Try again in 1 min." }]);
+        setChat(prev => [...prev, { role: "system", text: "❌ Upload Failed. Try again." }]);
     }
   };
 
   const sendMsg = async () => {
     if (!msg.trim()) return;
-    window.speechSynthesis.cancel();
+    window.speechSynthesis.cancel(); // Stop AI if I interrupt
     const newChat = [...chat, { role: "user", text: msg }];
     setChat(newChat);
     setMsg("");
     setLoading(true);
-    setTimeLeft(120);
 
     const formData = new FormData();
     formData.append("question", msg);
 
     try {
-      // ✅ CORRECTED LINK: /chat
       const res = await axios.post(`${API_URL}/chat`, formData);
       const aiResponse = res.data.response;
       setChat([...newChat, { role: "ai", text: aiResponse }]);
-      speak(aiResponse);
+      
+      // Only speak if voice is enabled
+      if (voiceEnabled) {
+          speak(aiResponse);
+      }
     } catch (err) { 
         console.error(err);
-        setChat([...newChat, { role: "system", text: "❌ Error: Server error or timeout." }]);
     }
     setLoading(false);
   };
@@ -168,7 +164,6 @@ function Interview() {
   const generateReport = async () => {
     setLoading(true);
     try {
-      // ✅ CORRECTED LINK: /generate_report
       const res = await axios.get(`${API_URL}/generate_report`);
       setReportData(res.data);
       setShowReport(true);
@@ -187,7 +182,8 @@ function Interview() {
             </div>
           </div>
           <div className="flex gap-2">
-             <button onClick={() => setVoiceEnabled(!voiceEnabled)} className="p-2 bg-slate-800 rounded-lg text-slate-400 hover:text-white">
+             {/* 🔇 MUTE BUTTON FIX */}
+             <button onClick={toggleVoice} className={`p-2 rounded-lg ${voiceEnabled ? 'bg-slate-800 text-green-400' : 'bg-red-900 text-white'}`}>
                {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
              </button>
              <button onClick={() => setShowCode(!showCode)} className={`p-2 rounded-lg ${showCode ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
