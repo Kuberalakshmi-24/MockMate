@@ -9,23 +9,14 @@ import {
   Code, Timer, Volume2, VolumeX, FileCheck, Award
 } from 'lucide-react';
 
-// 🌎 BACKEND URL
 const API_URL = "https://mockmate-backend-nxzo.onrender.com";
 
-// --- SIDEBAR COMPONENT ---
+// --- SIDEBAR (No Change) ---
 function Sidebar({ mobileOpen, setMobileOpen }) {
   const location = useLocation();
   const navigate = useNavigate();
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/login');
-  };
-
-  const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: MessageSquare, label: 'Interview Room', path: '/interview' },
-  ];
+  const handleLogout = async () => { await supabase.auth.signOut(); navigate('/login'); };
+  const navItems = [{ icon: LayoutDashboard, label: 'Dashboard', path: '/' }, { icon: MessageSquare, label: 'Interview Room', path: '/interview' }];
 
   return (
     <>
@@ -52,24 +43,20 @@ function Sidebar({ mobileOpen, setMobileOpen }) {
   );
 }
 
-// --- DASHBOARD COMPONENT ---
+// --- DASHBOARD (No Change) ---
 function Dashboard() {
   const [history, setHistory] = useState([]);
   const [stats, setStats] = useState({ total: 0, avgScore: 0 });
-
   useEffect(() => {
-    axios.get(`${API_URL}/dashboard`)
-      .then(res => {
+    axios.get(`${API_URL}/dashboard`).then(res => {
         if (Array.isArray(res.data)) {
             setHistory(res.data);
             const scores = res.data.map(i => parseInt(i.score) || 0).filter(s => s > 0);
             const avg = scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 0;
             setStats({ total: res.data.length, avgScore: avg });
         }
-      })
-      .catch(err => console.error("Dashboard Error:", err));
+    }).catch(err => console.error(err));
   }, []);
-
   return (
     <div className="p-6 md:p-10 max-w-7xl mx-auto">
       <div className="mb-8"><h1 className="text-3xl font-bold text-white mb-2">Welcome Back, Engineer! 👋</h1></div>
@@ -82,14 +69,16 @@ function Dashboard() {
   );
 }
 
-// --- INTERVIEW COMPONENT (Updated Mute Logic) ---
+// --- INTERVIEW COMPONENT (FIXED TIMER & VOICE) ---
 function Interview() {
   const [chat, setChat] = useState([]);
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [showCode, setShowCode] = useState(false); 
   const [timeLeft, setTimeLeft] = useState(120); 
-  const [voiceEnabled, setVoiceEnabled] = useState(true); 
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const voiceRef = useRef(true); // 🔴 FIX: Ref keeps track of voice even inside async functions
+  
   const [atsData, setAtsData] = useState(null); 
   const [showReport, setShowReport] = useState(false); 
   const [reportData, setReportData] = useState(null);
@@ -99,17 +88,29 @@ function Interview() {
 
   useEffect(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), [chat, loading]);
 
-  // 🔇 FIX: Stop Speaking IMMEDIATELY when Muted
+  // ⏲️ TIMER FIX: Use setInterval independent of other states
+  useEffect(() => {
+    let interval = null;
+    if (chat.length > 0 && !loading && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [chat.length, loading, timeLeft]); // Re-run only when state changes
+
+  // 🔇 VOICE FIX: Update Ref + State
   const toggleVoice = () => {
     const newState = !voiceEnabled;
     setVoiceEnabled(newState);
+    voiceRef.current = newState; // Update Ref
     if (!newState) {
-      window.speechSynthesis.cancel(); // Stop talking NOW!
+      window.speechSynthesis.cancel(); // Stop talking IMMEDIATELY
     }
   };
 
   const speak = (text) => {
-    if (!voiceEnabled) return;
+    if (!voiceRef.current) return; // 🔴 Check Ref, not State (Fixes async issue)
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
@@ -122,26 +123,23 @@ function Interview() {
     if(!file) return;
     const formData = new FormData();
     formData.append("file", file);
-    
     setChat([...chat, { role: "system", text: "⏳ Analyzing Resume... (I'm reading your skills)" }]);
 
     try {
       const res = await axios.post(`${API_URL}/upload`, formData);
       setAtsData(res.data.ats_report); 
       setChat(prev => [...prev, { role: "system", text: "✅ Resume Parsed! Check your ATS Score above. Type 'start' to begin." }]);
-    } catch (err) { 
-        console.error(err);
-        setChat(prev => [...prev, { role: "system", text: "❌ Upload Failed. Try again." }]);
-    }
+    } catch (err) { console.error(err); setChat(prev => [...prev, { role: "system", text: "❌ Upload Failed. Try again." }]); }
   };
 
   const sendMsg = async () => {
     if (!msg.trim()) return;
-    window.speechSynthesis.cancel(); // Stop AI if I interrupt
+    window.speechSynthesis.cancel();
     const newChat = [...chat, { role: "user", text: msg }];
     setChat(newChat);
     setMsg("");
     setLoading(true);
+    setTimeLeft(120); // Reset timer for next answer
 
     const formData = new FormData();
     formData.append("question", msg);
@@ -150,14 +148,8 @@ function Interview() {
       const res = await axios.post(`${API_URL}/chat`, formData);
       const aiResponse = res.data.response;
       setChat([...newChat, { role: "ai", text: aiResponse }]);
-      
-      // Only speak if voice is enabled
-      if (voiceEnabled) {
-          speak(aiResponse);
-      }
-    } catch (err) { 
-        console.error(err);
-    }
+      speak(aiResponse); // Uses updated Ref check inside
+    } catch (err) { console.error(err); }
     setLoading(false);
   };
 
@@ -182,7 +174,6 @@ function Interview() {
             </div>
           </div>
           <div className="flex gap-2">
-             {/* 🔇 MUTE BUTTON FIX */}
              <button onClick={toggleVoice} className={`p-2 rounded-lg ${voiceEnabled ? 'bg-slate-800 text-green-400' : 'bg-red-900 text-white'}`}>
                {voiceEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
              </button>

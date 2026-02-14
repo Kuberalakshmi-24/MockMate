@@ -7,9 +7,7 @@ import re
 import uuid
 import json
 
-# Load env vars
 load_dotenv()
-
 app = FastAPI()
 
 app.add_middleware(
@@ -20,12 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🔑 KEYS
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if GROQ_API_KEY:
     os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 
-# Global Variables
 resume_text = ""
 chat_history = [] 
 
@@ -33,7 +29,6 @@ chat_history = []
 async def health_check():
     return {"status": "alive", "message": "MockMate AI is ready!"}
 
-# --- 1. ATS RESUME SCORER (Improved Prompt) ---
 @app.post("/upload")
 async def upload_resume(file: UploadFile = File(...)):
     from langchain_groq import ChatGroq
@@ -54,28 +49,28 @@ async def upload_resume(file: UploadFile = File(...)):
         docs = loader.load()
         resume_text = " ".join([d.page_content for d in docs[:3]])
 
-        # --- STRICT ATS PROMPT ---
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.3) # Low temp for accuracy
+        # 🔴 STRICT PROMPT: NO GENERIC EXAMPLES
+        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1) # 0.1 means VERY STRICT
         
         ats_prompt = f"""
-        You are an expert ATS (Applicant Tracking System) Scanner.
+        You are an advanced ATS Scanner.
         
         TASK:
-        1. Identify the Job Role from the resume below (e.g. Data Scientist, Frontend Dev).
-        2. Compare the resume against industry standards for THAT role.
-        3. List 3-5 CRITICAL technical skills that are MISSING from the text.
-        4. Give a Score out of 100 based on keyword matches.
+        1. Read the RESUME TEXT below carefully.
+        2. Determine the specific JOB ROLE (e.g., Python Backend, React Frontend).
+        3. Compare the skills in the text against industry standards for THAT specific role.
+        4. List 3-5 technical skills that are COMPLETELY MISSING from the text. 
+           (Do NOT list skills if they are already present).
 
         RESUME TEXT:
         {resume_text[:3000]}
         
-        OUTPUT FORMAT (JSON ONLY):
-        Do NOT use example values. Generate REAL data based on the text above.
+        OUTPUT (JSON ONLY):
         {{
             "score": "85/100",
-            "missing_keywords": ["RealMissingSkill1", "RealMissingSkill2", "RealMissingSkill3"],
-            "formatting_issues": ["Issue 1", "Issue 2"],
-            "summary": "1 line summary of the candidate"
+            "missing_keywords": ["SpecificMissingSkill1", "SpecificMissingSkill2"],
+            "formatting_issues": ["Issue 1"],
+            "summary": "Specific summary"
         }}
         """
         ats_response = llm.invoke(ats_prompt)
@@ -92,7 +87,6 @@ async def upload_resume(file: UploadFile = File(...)):
             
     return {"message": "Resume processed!", "ats_report": ats_feedback}
 
-# --- 2. CHAT WITH AI ---
 @app.post("/chat")
 async def chat_interview(question: str = Form(...)):
     from langchain_groq import ChatGroq
@@ -104,13 +98,11 @@ async def chat_interview(question: str = Form(...)):
     
     prompt = f"""
     You are a technical interviewer.
-    RESUME CONTEXT: {resume_text[:3000]}
-    CHAT HISTORY: {chat_history[-3:]} 
+    RESUME: {resume_text[:3000]}
+    HISTORY: {chat_history[-3:]} 
     USER: {question}
     
-    Instructions:
-    1. If user says "start", ask a challenging technical question based on the resume.
-    2. Keep it conversational.
+    If user says "start", ask a specific technical question based on their projects/skills.
     """
     
     try:
@@ -121,7 +113,6 @@ async def chat_interview(question: str = Form(...)):
     except Exception as e:
         return {"response": "Sorry, could you repeat that?"}
 
-# --- 3. FINAL REPORT ---
 @app.get("/generate_report")
 async def generate_report():
     from langchain_groq import ChatGroq
